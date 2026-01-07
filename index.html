@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leaflet Hazard Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
+
+<style>
+html, body {
+  margin:0; padding:0; height:100vh;
+  display:flex; flex-direction:column;
+  font-family:sans-serif;
+}
+
+#buttonContainer {
+  display:flex; justify-content:space-between;
+  padding:8px; background:#f9f9f9; gap:8px; flex-wrap:wrap;
+}
+button {
+  padding:6px 12px; cursor:pointer;
+  border-radius:6px; border:1px solid #ccc;
+  transition:0.2s;
+}
+button:disabled { opacity:0.5; cursor:default; }
+
+#map { flex:1; }
+
+/* 通勤時間欄（画面上部） */
+#commuteBar {
+  padding:8px;
+  border-top:1px solid #ccc;
+  border-bottom:1px solid #ccc;
+  background:#f3f4f6;
+  display:flex;
+  gap:8px;
+  align-items:flex-start;
+}
+#commuteBar label {
+  font-size:14px;
+  font-weight:bold;
+}
+#commuteMemo {
+  flex:1;
+  min-height:40px;
+  font-size:13px;
+}
+
+/* マーカー一覧（画面下部・印刷対象） */
+#markerListContainer {
+  max-height:160px;
+  overflow-x:auto; overflow-y:hidden;
+  padding:6px;
+  border-top:1px solid #ccc;
+  background:#f9f9f9;
+  display:flex; gap:8px;
+  white-space:nowrap;
+}
+.marker-item {
+  display:flex; align-items:flex-start; gap:8px;
+  border-right:1px solid #ddd; cursor:pointer;
+  min-width:320px; padding:4px;
+}
+.marker-number {
+  width:24px;height:24px;background:red;color:white;
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:bold;
+}
+.marker-info {
+  display:flex; flex-direction:column; gap:2px;
+  font-size:14px; flex:1;
+}
+.marker-thumb {
+  width:100px; height:100px;
+  object-fit:contain;
+  border-radius:6px; flex-shrink:0;
+}
+
+/* small */
+#markerListContainer.marker-size-small { max-height:120px; }
+#markerListContainer.marker-size-small .marker-item { font-size:11px; min-width:220px; padding:2px; }
+#markerListContainer.marker-size-small .marker-thumb { width:60px; height:60px; }
+
+/* large */
+#markerListContainer.marker-size-large { max-height:260px; }
+#markerListContainer.marker-size-large .marker-item { font-size:17px; min-width:420px; padding:6px; }
+#markerListContainer.marker-size-large .marker-thumb { width:180px; height:180px; }
+
+.start-marker b {
+  background:#28a745;color:white;
+  padding:2px 6px;border-radius:4px;
+}
+.goal-marker b {
+  background:#dc3545;color:white;
+  padding:2px 6px;border-radius:4px;
+}
+.popup-display button { margin:2px 0; }
+.rating-stars span { cursor:pointer; font-size:20px; }
+
+.popup-display img {
+  max-width:260px;
+  max-height:260px;
+  display:block;
+  margin-top:4px;
+}
+
+/* 追加機能パネル */
+#extraOptionsPanel {
+  position:fixed;
+  top:56px; right:10px;
+  background:white;
+  border:1px solid #ccc;
+  border-radius:8px;
+  padding:8px;
+  z-index:1000;
+  max-width:340px;
+  max-height:80vh;
+  overflow:auto;
+  box-shadow:0 2px 8px rgba(0,0,0,0.2);
+  display:none;
+  font-size:13px;
+}
+#extraOptionsPanel h3 { margin:4px 0 6px; font-size:14px; }
+#extraOptionsPanel section {
+  margin-bottom:8px;
+  border-bottom:1px dashed #ddd;
+  padding-bottom:6px;
+}
+#extraOptionsPanel section:last-child { border-bottom:none; }
+
+/* 共通モーダル（QR・ヘルプ） */
+#qrModal, #helpModal {
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.5);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:1500;
+}
+.modal-content {
+  background:#fff;
+  padding:16px;
+  border-radius:8px;
+  max-width:360px;
+  width:92%;
+  box-shadow:0 2px 8px rgba(0,0,0,0.4);
+  font-size:13px;
+}
+.modal-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:8px;
+}
+.close-btn {
+  border:none;
+  background:transparent;
+  font-size:18px;
+  cursor:pointer;
+}
+
+/* QR */
+#shareUrlBox {
+  width:100%;
+  margin-top:8px;
+  font-size:11px;
+  padding:6px;
+}
+
+/* 使い方スライド */
+#helpImage {
+  max-width:100%;
+  height:auto;
+  display:block;
+  margin:0 auto;
+  border-radius:6px;
+}
+#helpNav {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top:8px;
+}
+#helpCounter { font-size:11px; color:#555; }
+
+/* 検索候補 */
+.search-dropdown {
+  position:absolute;
+  top:38px;
+  left:0;
+  background:#fff;
+  border:1px solid #ccc;
+  border-radius:6px;
+  width:min(520px, 90vw);
+  max-height:220px;
+  overflow:auto;
+  z-index:2000;
+  box-shadow:0 2px 8px rgba(0,0,0,0.2);
+}
+.search-item {
+  padding:8px;
+  cursor:pointer;
+  font-size:13px;
+}
+.search-item:hover { background:#f3f4f6; }
+
+/* 印刷：画面の見え方を維持（地図サイズの強制変更はしない） */
+@media print {
+  @page { size: A4 landscape; margin: 5mm; }
+  body, html { height:auto; display:block; margin:0; padding:0; }
+  #buttonContainer, #extraOptionsPanel, #qrModal, #helpModal { display:none !important; }
+  /* 地図の高さはJSで「画面のpx」を固定する（ズームずれ防止） */
+  #markerListContainer { padding:2px !important; max-height:none; }
+}
+</style>
+</head>
+
+<body>
+<div id="buttonContainer">
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button id="addMarkerBtn">マーカーモード OFF</button>
+    <button id="addRouteBtn">ルートモード OFF</button>
+    <button id="undoBtn" disabled>戻る</button>
+    <button id="redoBtn" disabled>進む</button>
+  </div>
+
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <!-- 検索UI（確実に動くNominatim検索） -->
+    <div style="position:relative;">
+      <input id="searchInput" type="text" placeholder="場所を検索（例：東京駅）"
+        style="padding:6px;border:1px solid #ccc;border-radius:6px;min-width:220px;">
+      <div id="searchResults"></div>
+    </div>
+    <button id="searchBtn">検索</button>
+
+    <button id="helpBtn">使い方</button>
+    <button id="showQrBtn">共有QRコード</button>
+    <button id="extraOptionsBtn">追加機能</button>
+    <button id="clearDataBtn" style="background:#dc3545;color:white;">保存データ削除</button>
+  </div>
+</div>
+
+<!-- 通勤時間欄（画面上部・印刷対象） -->
+<div id="commuteBar">
+  <label for="commuteMemo">通勤時間メモ：</label>
+  <textarea id="commuteMemo" placeholder="通勤時間やルートのメモを記入してください"></textarea>
+  <button id="saveCommuteMemoBtn">メモ保存</button>
+</div>
+
+<div id="map"></div>
+
+<!-- マーカー一覧（画面下部・印刷対象） -->
+<div id="markerListContainer"></div>
+
+<!-- 追加機能パネル -->
+<div id="extraOptionsPanel">
+  <h3>追加機能</h3>
+
+  <section>
+    <strong>通勤時間欄</strong><br>
+    <label><input type="checkbox" id="toggleCommuteVisible"> 通勤時間欄を表示</label><br>
+    <small>画面上部の通勤時間メモ欄を表示 / 非表示（印刷にも反映）</small>
+  </section>
+
+  <section>
+    <strong>マーカー一覧の表示・サイズ</strong><br>
+    <select id="markerListSizeSelect">
+      <option value="none">表示しない</option>
+      <option value="small">小さい</option>
+      <option value="medium" selected>中くらい</option>
+      <option value="large">大きい</option>
+    </select><br>
+    <small>画面下部のマーカー説明欄のサイズ（印刷時も同じ設定）</small>
+  </section>
+
+  <section>
+    <strong>印刷</strong><br>
+    <button id="printLandscapeBtn">横向きで印刷</button><br>
+    <small>画面の見え方（中心/ズーム）を固定して印刷します。</small>
+  </section>
+
+  <section>
+    <strong>自前画像モード</strong><br>
+    <input type="file" id="customImageInput" accept="image/*"><br>
+    <button id="toggleCustomImageBtn" disabled>自前画像モード ON</button><br>
+    <small>画像を選択すると、Leafletタイルの代わりに画像を背景として使用できます。</small>
+  </section>
+</div>
+
+<!-- QRコードモーダル -->
+<div id="qrModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span>この地図の状態を共有</span>
+      <button id="closeQrBtn" class="close-btn" aria-label="閉じる">×</button>
+    </div>
+    <div id="qrcode" style="display:flex;justify-content:center;"></div>
+    <p style="margin-top:8px;">下のURLをコピーして共有することもできます。</p>
+    <textarea id="shareUrlBox" readonly></textarea>
+  </div>
+</div>
+
+<!-- 使い方スライドモーダル（画像のみ） -->
+<div id="helpModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span>使い方ガイド</span>
+      <button id="closeHelpBtn" class="close-btn" aria-label="閉じる">×</button>
+    </div>
+    <img id="helpImage" src="" alt="使い方スライド">
+    <div id="helpNav">
+      <button id="helpPrevBtn">前へ</button>
+      <span id="helpCounter"></span>
+      <button id="helpNextBtn">次へ</button>
+    </div>
+    <p style="font-size:11px;margin-top:6px;">
+      
+    </p>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<script>
+// ========== 地図初期化 ==========
+const map = L.map('map', {
+  zoomSnap: 0.25,
+  zoomDelta: 0.5,
+  minZoom: 10,
+  maxZoom: 20
+}).setView([35.690579,139.698186], 17);
+
+const baseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'© OpenStreetMap contributors',
+  maxZoom: 20
+}).addTo(map);
+
+// 既存のLeaflet geocoderも残す（左上）
+L.Control.geocoder({ defaultMarkGeocode:false })
+  .on('markgeocode', e=>map.setView(e.geocode.center, Math.max(map.getZoom(), 18), {animate:false}))
+  .addTo(map);
+
+// ========== DOM ==========
+const addMarkerBtn=document.getElementById('addMarkerBtn');
+const addRouteBtn=document.getElementById('addRouteBtn');
+const undoBtn=document.getElementById('undoBtn');
+const redoBtn=document.getElementById('redoBtn');
+const clearDataBtn=document.getElementById('clearDataBtn');
+const markerListContainer=document.getElementById('markerListContainer');
+
+const extraOptionsBtn=document.getElementById('extraOptionsBtn');
+const extraOptionsPanel=document.getElementById('extraOptionsPanel');
+
+const commuteBar=document.getElementById('commuteBar');
+const commuteMemo=document.getElementById('commuteMemo');
+const saveCommuteMemoBtn=document.getElementById('saveCommuteMemoBtn');
+const toggleCommuteVisible=document.getElementById('toggleCommuteVisible');
+
+const markerListSizeSelect=document.getElementById('markerListSizeSelect');
+const printLandscapeBtn=document.getElementById('printLandscapeBtn');
+
+const customImageInput=document.getElementById('customImageInput');
+const toggleCustomImageBtn=document.getElementById('toggleCustomImageBtn');
+
+// 検索（強化）
+const searchInput = document.getElementById("searchInput");
+const searchBtn = document.getElementById("searchBtn");
+const searchResultsHost = document.getElementById("searchResults");
+
+// QR
+const showQrBtn = document.getElementById('showQrBtn');
+const qrModal = document.getElementById('qrModal');
+const closeQrBtn = document.getElementById('closeQrBtn');
+const shareUrlBox = document.getElementById('shareUrlBox');
+
+// Help
+const helpBtn = document.getElementById('helpBtn');
+const helpModal = document.getElementById('helpModal');
+const closeHelpBtn = document.getElementById('closeHelpBtn');
+const helpImage = document.getElementById('helpImage');
+const helpPrevBtn = document.getElementById('helpPrevBtn');
+const helpNextBtn = document.getElementById('helpNextBtn');
+const helpCounter = document.getElementById('helpCounter');
+
+// 使い方画像（同じフォルダに置く）
+const helpSlides = [
+  'help1.jpg',
+  'help2.jpg',
+  'help3.jpg',
+  'help4.jpg',
+  'help5.jpg'
+];
+
+let helpIndex = 0;
+
+let addMarkerMode=false, addRouteMode=false;
+let markers=[], routes=[], routePoints=[], routeLine=null;
+let undoStacks=[], redoStacks=[], currentRouteIndex=0;
+const routeColors=['blue','red','green','orange','purple','brown'];
+const categories=['転倒','転落','激突','交通事故','落下','狭路','雑踏','雨天'];
+
+// UI状態
+let commuteVisible = true;
+let markerListSize = 'medium';
+
+// 自前画像モード
+let customImageUrl=null;
+let customImageOverlay=null;
+let customImageModeOn=false;
+
+// ========== マーカー番号アイコン ==========
+function createMarkerIconHtml(index) {
+  return `
+    <div style="
+      width:28px;height:28px;background:red;color:white;
+      border-radius:50%;display:flex;align-items:center;
+      justify-content:center;font-size:14px;font-weight:bold;
+      position:relative;
+    ">
+      <span>${index}</span>
+    </div>
+  `;
+}
+function setMarkerIcon(marker, index) {
+  const html = createMarkerIconHtml(index);
+  const icon = L.divIcon({
+    html,
+    className:'',
+    iconSize:[28,28],
+    iconAnchor:[14,28],
+    popupAnchor:[0,-28]
+  });
+  marker.setIcon(icon);
+}
+
+// ========== ボタン状態 ==========
+function updateUndoRedoButtons(){
+  const active = addRouteMode && routeLine;
+  undoBtn.disabled = !active || (undoStacks[currentRouteIndex]?.length ?? 0) === 0;
+  redoBtn.disabled = !active || (redoStacks[currentRouteIndex]?.length ?? 0) === 0;
+}
+function updateButtonStates(){
+  addMarkerBtn.style.background=addMarkerMode?"#28a745":"";
+  addMarkerBtn.style.color=addMarkerMode?"white":"";
+  addRouteBtn.style.background=addRouteMode?"#007bff":"";
+  addRouteBtn.style.color=addRouteMode?"white":"";
+  updateUndoRedoButtons();
+  map.getContainer().style.cursor=(addMarkerMode||addRouteMode)?'crosshair':'';
+}
+
+// ========== 画像圧縮 ==========
+function compressImage(file, maxWidth=300, callback){
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const img=new Image();
+    img.onload=function(){
+      const canvas=document.createElement('canvas');
+      const scale=Math.min(1,maxWidth/img.width);
+      canvas.width=img.width*scale; canvas.height=img.height*scale;
+      const ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      callback(canvas.toDataURL('image/jpeg',0.7));
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ========== マーカーポップアップ ==========
+function createMarkerPopup(marker){
+  if(marker.getPopup()) return;
+  const popup=document.createElement('div');
+  popup.className='popup-display';
+  popup.innerHTML=`
+    <div style="margin-bottom:6px;">
+      <label>画像:</label><br>
+      <input type="file" accept="image/*"><br>
+      ${marker.imageDataUrl?`<img src="${marker.imageDataUrl}" style="max-width:100%;margin-top:4px;">`:''}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div>
+        <label>種別:</label><br>
+        <select id="categorySelect">
+          <option value="" ${!marker.category?'selected':''}>未選択</option>
+          ${categories.map(c=>`<option value="${c}" ${c===marker.category?'selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label>危険度:</label><br>
+        <div id="ratingDiv" class="rating-stars"></div>
+      </div>
+    </div>
+    <div style="margin-top:6px;">
+      <label>説明:</label><br>
+      <textarea>${marker.description||''}</textarea>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+      <button class="save-btn">保存</button>
+      <button class="delete-btn">削除</button>
+    </div>
+  `;
+
+  const textarea=popup.querySelector('textarea');
+  const categorySelect=popup.querySelector('#categorySelect');
+  const saveBtn=popup.querySelector('.save-btn');
+  const deleteBtn=popup.querySelector('.delete-btn');
+  const ratingDiv=popup.querySelector('#ratingDiv');
+  const fileInput=popup.querySelector('input[type="file"]');
+
+  function renderStars(rating){
+    ratingDiv.innerHTML='';
+    for(let i=1;i<=5;i++){
+      const star=document.createElement('span');
+      star.textContent=i<=rating?'★':'☆';
+      star.style.color=i<=rating?'gold':'black';
+      star.style.fontSize='28px';
+      star.addEventListener('click', e=>{
+        e.stopPropagation();
+        marker.rating=i;
+        renderStars(i);
+        updateMarkerList();
+      });
+      ratingDiv.appendChild(star);
+    }
+  }
+  renderStars(marker.rating||0);
+
+  fileInput.addEventListener('change', ()=>{
+    const file=fileInput.files[0];
+    if(!file) return;
+    compressImage(file,300,url=>{
+      marker.imageDataUrl=url;
+      let existingImg=popup.querySelector('img');
+      if(existingImg) existingImg.src=url;
+      else {
+        const imgEl=document.createElement('img');
+        imgEl.src=url;
+        imgEl.style.maxWidth='100%';
+        imgEl.style.marginTop='4px';
+        popup.insertBefore(imgEl, popup.firstChild.nextSibling);
+      }
+      updateMarkerList();
+    });
+  });
+
+  saveBtn.addEventListener('click', ()=>{
+    marker.description=textarea.value;
+    marker.category=categorySelect.value||'';
+    marker.closePopup();
+    saveData(); updateMarkerList();
+  });
+
+  deleteBtn.addEventListener('click', ()=>{
+    marker.closePopup();
+    map.removeLayer(marker);
+    markers=markers.filter(m=>m!==marker);
+    reassignMarkerNumbers();
+    saveData();
+  });
+
+  marker.bindPopup(popup);
+}
+
+// ========== マーカー操作 ==========
+function addMarker(latlng){
+  const marker=L.marker(latlng,{
+    rating:0, category:'', imageDataUrl:null, description:''
+  }).addTo(map);
+  markers.push(marker);
+  setMarkerIcon(marker, markers.length);
+  createMarkerPopup(marker);
+  marker.openPopup();
+  updateMarkerList();
+}
+
+function reassignMarkerNumbers(){
+  markers.forEach((m,i)=>setMarkerIcon(m,i+1));
+  updateMarkerList();
+}
+
+function updateMarkerList(){
+  markerListContainer.innerHTML='';
+  markers.forEach((m,i)=>{
+    const div=document.createElement('div');
+    div.className='marker-item';
+    const stars=[...Array(5)].map((_,j)=>`<span style="color:${j<(m.rating||0)?'gold':'black'}">${j<(m.rating||0)?'★':'☆'}</span>`).join('');
+    let imgHtml='';
+    if(m.imageDataUrl) imgHtml=`<img class="marker-thumb" src="${m.imageDataUrl}">`;
+    const categoryText=m.category||'未選択';
+    div.innerHTML=`
+      <div class="marker-number">${i+1}</div>
+      ${imgHtml}
+      <div class="marker-info">
+        <div>${categoryText}</div>
+        <div class="rating-stars">${stars}</div>
+        <div>${m.description||''}</div>
+      </div>`;
+    div.addEventListener('click',()=>{
+      if(!m.getPopup()) createMarkerPopup(m);
+      m.openPopup();
+      map.setView(m.getLatLng(), map.getZoom(), {animate:false});
+    });
+    markerListContainer.appendChild(div);
+  });
+}
+
+function applyMarkerListSize(size){
+  markerListSize = size;
+  markerListContainer.classList.remove('marker-size-small','marker-size-large');
+  if(size === 'none'){
+    markerListContainer.style.display='none';
+  } else {
+    markerListContainer.style.display='flex';
+    if(size === 'small') markerListContainer.classList.add('marker-size-small');
+    if(size === 'large') markerListContainer.classList.add('marker-size-large');
+  }
+}
+
+// ========== ルート ==========
+function startRouteMode(){
+  addRouteMode=true;
+  routePoints=[];
+  const color=routeColors[currentRouteIndex%routeColors.length];
+  routeLine=L.polyline([], {color, weight:6}).addTo(map);
+  routes.push({line:routeLine, clickLine:null, start:null, goal:null, startVisible:true, goalVisible:true});
+  undoStacks[currentRouteIndex]=[];
+  redoStacks[currentRouteIndex]=[];
+}
+
+function addRoutePoint(latlng){
+  routePoints.push(latlng);
+  routeLine.setLatLngs(routePoints);
+  undoStacks[currentRouteIndex].push(latlng);
+  redoStacks[currentRouteIndex]=[];
+  updateUndoRedoButtons();
+  saveData();
+}
+
+function stopRouteMode(){
+  addRouteMode=false;
+  if(routeLine && routePoints.length>0){
+    const routeObj=routes[currentRouteIndex];
+    createRouteClickLine(routeObj);
+    updateStartGoalMarkers(routeObj);
+    routeObj.line.bringToFront();
+  }
+  routeLine=null;
+  currentRouteIndex++;
+  saveData();
+  updateButtonStates();
+}
+
+undoBtn.addEventListener('click', ()=>{
+  if(!routeLine||undoStacks[currentRouteIndex].length===0)return;
+  const rm=undoStacks[currentRouteIndex].pop();
+  redoStacks[currentRouteIndex].push(rm);
+  routePoints.pop();
+  routeLine.setLatLngs(routePoints);
+  updateUndoRedoButtons();
+  saveData();
+});
+redoBtn.addEventListener('click', ()=>{
+  if(!routeLine||redoStacks[currentRouteIndex].length===0)return;
+  const rs=redoStacks[currentRouteIndex].pop();
+  undoStacks[currentRouteIndex].push(rs);
+  routePoints.push(rs);
+  routeLine.setLatLngs(routePoints);
+  updateUndoRedoButtons();
+  saveData();
+});
+
+function updateStartGoalMarkers(routeObj){
+  const latlngs=routeObj.line.getLatLngs();
+  if(latlngs.length===0) return;
+
+  if(routeObj.start) map.removeLayer(routeObj.start);
+  if(routeObj.goal) map.removeLayer(routeObj.goal);
+
+  routeObj.start=L.marker(latlngs[0],{
+    icon:L.divIcon({ html:'<b>スタート</b>', className:'start-marker', iconSize:[60,24], iconAnchor:[30,12] })
+  });
+  routeObj.goal=L.marker(latlngs[latlngs.length-1],{
+    icon:L.divIcon({ html:'<b>ゴール</b>', className:'goal-marker', iconSize:[60,24], iconAnchor:[30,12] })
+  });
+
+  if(routeObj.startVisible) routeObj.start.addTo(map);
+  if(routeObj.goalVisible) routeObj.goal.addTo(map);
+
+  routeObj.start.on('click', ()=>showRoutePopup(latlngs[0], routeObj));
+  routeObj.goal.on('click', ()=>showRoutePopup(latlngs[latlngs.length-1], routeObj));
+}
+
+function createRouteClickLine(routeObj){
+  if(routeObj.clickLine) map.removeLayer(routeObj.clickLine);
+  const latlngs=routeObj.line.getLatLngs();
+  routeObj.clickLine=L.polyline(latlngs,{ color:'transparent', weight:20, interactive:true }).addTo(map);
+  routeObj.clickLine.on('click', e=>showRoutePopup(e.latlng, routeObj));
+}
+
+function showRoutePopup(latlng, routeObj){
+  const popupContent=document.createElement('div');
+
+  const toggleStartBtn=document.createElement('button');
+  toggleStartBtn.textContent=routeObj.startVisible?'スタート非表示':'スタート表示';
+  toggleStartBtn.addEventListener('click', ()=>{
+    if(routeObj.start._map){ map.removeLayer(routeObj.start); routeObj.startVisible=false; }
+    else { routeObj.start.addTo(map); routeObj.startVisible=true; }
+    map.closePopup(); saveData();
+  });
+
+  const toggleGoalBtn=document.createElement('button');
+  toggleGoalBtn.textContent=routeObj.goalVisible?'ゴール非表示':'ゴール表示';
+  toggleGoalBtn.addEventListener('click', ()=>{
+    if(routeObj.goal._map){ map.removeLayer(routeObj.goal); routeObj.goalVisible=false; }
+    else { routeObj.goal.addTo(map); routeObj.goalVisible=true; }
+    map.closePopup(); saveData();
+  });
+
+  const deleteBtn=document.createElement('button');
+  deleteBtn.textContent='ルート削除';
+  deleteBtn.style.background='#dc3545';
+  deleteBtn.style.color='white';
+  deleteBtn.addEventListener('click', ()=>{
+    map.removeLayer(routeObj.line);
+    map.removeLayer(routeObj.clickLine);
+    if(routeObj.start) map.removeLayer(routeObj.start);
+    if(routeObj.goal) map.removeLayer(routeObj.goal);
+    routes=routes.filter(r=>r!==routeObj);
+    saveData(); map.closePopup();
+  });
+
+  popupContent.appendChild(toggleStartBtn);
+  popupContent.appendChild(document.createElement('br'));
+  popupContent.appendChild(toggleGoalBtn);
+  popupContent.appendChild(document.createElement('br'));
+  popupContent.appendChild(deleteBtn);
+
+  L.popup().setLatLng(latlng).setContent(popupContent).openOn(map);
+}
+
+// ========== 保存/復元（URL state優先） ==========
+function getCurrentState(){
+  return {
+    markers:markers.map(m=>({
+      lat:m.getLatLng().lat,
+      lng:m.getLatLng().lng,
+      category:m.category||'',
+      rating:m.rating||0,
+      description:m.description||'',
+      imageDataUrl:m.imageDataUrl||null
+    })),
+    routes:routes.map(r=>({
+      color:r.line.options.color,
+      latlngs:r.line.getLatLngs().map(ll=>({lat:ll.lat,lng:ll.lng})),
+      startVisible:r.startVisible,
+      goalVisible:r.goalVisible
+    })),
+    commuteMemo: commuteMemo.value || '',
+    commuteVisible: commuteVisible,
+    markerListSize: markerListSize
+  };
+}
+function saveData(){
+  localStorage.setItem('mapAppData', JSON.stringify(getCurrentState()));
+}
+function loadStateFromUrlParam(){
+  const params = new URLSearchParams(window.location.search);
+  const encoded = params.get('state');
+  if(!encoded) return null;
+  try{
+    const json = decodeURIComponent(atob(encoded));
+    const data = JSON.parse(json);
+    localStorage.setItem('mapAppData', JSON.stringify(data));
+    return data;
+  } catch(e){
+    console.error('state読み込み失敗', e);
+    return null;
+  }
+}
+function loadStateFromLocalStorage(){
+  const raw = localStorage.getItem('mapAppData');
+  if(!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+function loadData(){
+  let data = loadStateFromUrlParam();
+  if(!data) data = loadStateFromLocalStorage();
+
+  if(!data){
+    commuteVisible = true;
+    commuteBar.style.display = '';
+    toggleCommuteVisible.checked = true;
+    applyMarkerListSize('medium');
+    markerListSizeSelect.value = 'medium';
+    return;
+  }
+
+  // 通勤
+  commuteMemo.value = typeof data.commuteMemo === 'string' ? data.commuteMemo : '';
+  commuteVisible = typeof data.commuteVisible === 'boolean' ? data.commuteVisible : true;
+  commuteBar.style.display = commuteVisible ? '' : 'none';
+  toggleCommuteVisible.checked = commuteVisible;
+
+  // 一覧サイズ
+  markerListSize = typeof data.markerListSize === 'string' ? data.markerListSize : 'medium';
+  markerListSizeSelect.value = markerListSize;
+  applyMarkerListSize(markerListSize);
+
+  // マーカー
+  if(Array.isArray(data.markers)){
+    data.markers.forEach(m=>{
+      const marker=L.marker([m.lat,m.lng],{
+        rating:m.rating||0,
+        category:m.category||'',
+        imageDataUrl:m.imageDataUrl||null,
+        description:m.description||''
+      }).addTo(map);
+      markers.push(marker);
+      setMarkerIcon(marker, markers.length);
+      createMarkerPopup(marker);
+    });
+  }
+
+  // ルート
+  if(Array.isArray(data.routes)){
+    data.routes.forEach(r=>{
+      const line=L.polyline(
+        (r.latlngs||[]).map(p=>L.latLng(p.lat,p.lng)),
+        {color:r.color||'blue', weight:6}
+      ).addTo(map);
+
+      const routeObj={
+        line,
+        clickLine:null,
+        start:null,
+        goal:null,
+        startVisible:r.startVisible!==false,
+        goalVisible:r.goalVisible!==false
+      };
+      createRouteClickLine(routeObj);
+      updateStartGoalMarkers(routeObj);
+      routes.push(routeObj);
+    });
+  }
+
+  updateMarkerList();
+}
+
+loadData();
+updateButtonStates();
+
+// ========== クリック挙動（マーカー/ルート） ==========
+map.on('click', e=>{
+  if(addMarkerMode) addMarker(e.latlng);
+  else if(addRouteMode) addRoutePoint(e.latlng);
+});
+
+// ========== UI操作 ==========
+addMarkerBtn.addEventListener("click",()=>{
+  addMarkerMode=!addMarkerMode;
+  if(addMarkerMode){
+    if(addRouteMode) stopRouteMode();
+    addMarkerBtn.textContent='マーカーモード ON';
+    addRouteBtn.textContent='ルートモード OFF';
+  } else {
+    addMarkerBtn.textContent='マーカーモード OFF';
+  }
+  updateButtonStates();
+});
+
+addRouteBtn.addEventListener("click", ()=>{
+  addRouteMode=!addRouteMode;
+  if(addRouteMode){
+    if(addMarkerMode) addMarkerMode=false;
+    startRouteMode();
+    addRouteBtn.textContent='ルートモード ON';
+    addMarkerBtn.textContent='マーカーモード OFF';
+  } else {
+    stopRouteMode();
+    addRouteBtn.textContent='ルートモード OFF';
+  }
+  updateButtonStates();
+});
+
+extraOptionsBtn.addEventListener('click', ()=>{
+  const visible = extraOptionsPanel.style.display === 'block';
+  extraOptionsPanel.style.display = visible ? 'none' : 'block';
+});
+
+saveCommuteMemoBtn.addEventListener('click', ()=>{
+  saveData();
+  alert('通勤時間メモを保存しました。');
+});
+
+toggleCommuteVisible.addEventListener('change', ()=>{
+  commuteVisible = toggleCommuteVisible.checked;
+  commuteBar.style.display = commuteVisible ? '' : 'none';
+  saveData();
+});
+
+markerListSizeSelect.addEventListener('change', ()=>{
+  applyMarkerListSize(markerListSizeSelect.value);
+  saveData();
+});
+
+// ========== 自前画像モード ==========
+customImageInput.addEventListener('change', ()=>{
+  const file = customImageInput.files[0];
+  if(!file){
+    customImageUrl=null;
+    toggleCustomImageBtn.disabled=true;
+    return;
+  }
+  const reader=new FileReader();
+  reader.onload=function(e){
+    customImageUrl=e.target.result;
+    toggleCustomImageBtn.disabled=false;
+    toggleCustomImageBtn.textContent='自前画像モード ON';
+    customImageModeOn=false;
+  };
+  reader.readAsDataURL(file);
+});
+
+toggleCustomImageBtn.addEventListener('click', ()=>{
+  if(!customImageUrl) return;
+  customImageModeOn = !customImageModeOn;
+  if(customImageModeOn){
+    const bounds = map.getBounds();
+    if(customImageOverlay) map.removeLayer(customImageOverlay);
+    customImageOverlay = L.imageOverlay(customImageUrl, bounds).addTo(map);
+    baseLayer.setOpacity(0);
+    toggleCustomImageBtn.textContent='自前画像モード OFF';
+  } else {
+    if(customImageOverlay){ map.removeLayer(customImageOverlay); customImageOverlay=null; }
+    baseLayer.setOpacity(1);
+    toggleCustomImageBtn.textContent='自前画像モード ON';
+  }
+});
+
+// ========== データ削除 ==========
+clearDataBtn.addEventListener('click', ()=>{
+  if(confirm('保存データを削除しますか？')){
+    markers.forEach(m=>map.removeLayer(m));
+    routes.forEach(r=>{
+      map.removeLayer(r.line);
+      if(r.clickLine) map.removeLayer(r.clickLine);
+      if(r.start) map.removeLayer(r.start);
+      if(r.goal) map.removeLayer(r.goal);
+    });
+    markers=[]; routes=[];
+    localStorage.removeItem('mapAppData');
+    location.reload();
+  }
+});
+
+// ========== QR共有（状態込みURL） ==========
+function createShareUrl(){
+  const json = JSON.stringify(getCurrentState());
+  const encoded = btoa(encodeURIComponent(json));
+  const base = window.location.origin + window.location.pathname;
+  return `${base}?state=${encoded}`;
+}
+showQrBtn.addEventListener('click', ()=>{
+  const url = createShareUrl();
+  shareUrlBox.value = url;
+  const qrContainer = document.getElementById('qrcode');
+  qrContainer.innerHTML = '';
+  new QRCode(qrContainer, { text:url, width:180, height:180 });
+  qrModal.style.display = 'flex';
+});
+closeQrBtn.addEventListener('click', ()=>{ qrModal.style.display = 'none'; });
+qrModal.addEventListener('click', (e)=>{ if(e.target === qrModal) qrModal.style.display='none'; });
+
+// ========== 使い方（画像スライド） ==========
+function updateHelpSlide(){
+  if(!helpSlides.length){
+    helpImage.style.display='none';
+    helpCounter.textContent='画像が設定されていません';
+    helpPrevBtn.disabled=true; helpNextBtn.disabled=true;
+    return;
+  }
+  helpImage.style.display='block';
+  helpImage.src = helpSlides[helpIndex];
+  helpCounter.textContent = `${helpIndex+1} / ${helpSlides.length}`;
+  const one = helpSlides.length <= 1;
+  helpPrevBtn.disabled = one;
+  helpNextBtn.disabled = one;
+}
+helpBtn.addEventListener('click', ()=>{
+  helpIndex=0;
+  updateHelpSlide();
+  helpModal.style.display='flex';
+});
+closeHelpBtn.addEventListener('click', ()=>{ helpModal.style.display='none'; });
+helpModal.addEventListener('click', (e)=>{ if(e.target===helpModal) helpModal.style.display='none'; });
+helpPrevBtn.addEventListener('click', ()=>{
+  if(!helpSlides.length) return;
+  helpIndex = (helpIndex - 1 + helpSlides.length) % helpSlides.length;
+  updateHelpSlide();
+});
+helpNextBtn.addEventListener('click', ()=>{
+  if(!helpSlides.length) return;
+  helpIndex = (helpIndex + 1) % helpSlides.length;
+  updateHelpSlide();
+});
+
+// ========== 検索（確実に動くNominatim） ==========
+async function nominatimSearch(q) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=8&q=${encodeURIComponent(q)}`;
+  const res = await fetch(url, { headers: { "Accept-Language": "ja" } });
+  if (!res.ok) throw new Error("search failed");
+  return res.json();
+}
+function clearSearchResults(){ searchResultsHost.innerHTML=''; }
+function renderSearchResults(list){
+  clearSearchResults();
+  if(!list || list.length===0) return;
+
+  const box=document.createElement('div');
+  box.className='search-dropdown';
+
+  list.forEach(item=>{
+    const row=document.createElement('div');
+    row.className='search-item';
+    row.textContent=item.display_name;
+    row.addEventListener('click', ()=>{
+      const lat=parseFloat(item.lat);
+      const lon=parseFloat(item.lon);
+      map.setView([lat,lon], Math.max(map.getZoom(), 18), {animate:false});
+      clearSearchResults();
+    });
+    box.appendChild(row);
+  });
+
+  searchResultsHost.appendChild(box);
+}
+async function doSearch(){
+  const q=(searchInput.value||'').trim();
+  if(!q) return;
+  try{
+    const results=await nominatimSearch(q);
+    renderSearchResults(results);
+  }catch(e){
+    console.error(e);
+    alert('検索に失敗しました（ネットワーク/制限の可能性）');
+  }
+}
+searchBtn.addEventListener('click', doSearch);
+searchInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSearch(); });
+document.addEventListener('click', (e)=>{
+  if(e.target===searchInput || e.target===searchBtn) return;
+  if(searchResultsHost.contains(e.target)) return;
+  clearSearchResults();
+});
+
+// ========== 印刷：画面表示を固定してズームずれ防止 ==========
+let _printView = null;
+function freezeMapViewForPrint() {
+  const mapEl = document.getElementById("map");
+  const rect = mapEl.getBoundingClientRect();
+  _printView = {
+    center: map.getCenter(),
+    zoom: map.getZoom(),
+    prevHeight: mapEl.style.height
+  };
+  mapEl.style.height = rect.height + "px";
+  map.invalidateSize();
+  map.setView(_printView.center, _printView.zoom, { animate:false });
+}
+function restoreMapViewAfterPrint() {
+  const mapEl = document.getElementById("map");
+  if(!_printView) return;
+  mapEl.style.height = _printView.prevHeight || "";
+  map.invalidateSize();
+  map.setView(_printView.center, _printView.zoom, { animate:false });
+  _printView = null;
+}
+window.addEventListener("beforeprint", freezeMapViewForPrint);
+window.addEventListener("afterprint", restoreMapViewAfterPrint);
+
+printLandscapeBtn.addEventListener('click', ()=>{
+  freezeMapViewForPrint();
+  setTimeout(()=>window.print(), 50);
+});
+</script>
+</body>
+</html>
